@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vibra — Sua comunidade</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f7f4fc;color:#292139;font-family:Arial,sans-serif}
+header{background:white;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 12px #0001}
+.logo{font-size:28px;font-weight:900;color:#9462e8}
+main{max-width:650px;margin:25px auto;padding:15px}
+.card{background:white;border-radius:18px;padding:20px;margin-bottom:16px;box-shadow:0 4px 18px #0000000b}
+h2{margin-top:0}
+input,textarea{width:100%;padding:13px;border:1px solid #e4dced;border-radius:10px;margin:7px 0;font-size:15px}
+button{border:0;border-radius:10px;padding:12px 18px;background:#9462e8;color:white;font-weight:bold;cursor:pointer;margin:5px 3px 5px 0}
+button.secondary{background:#eee8f8;color:#65449b}
+.post{border-top:1px solid #eee;padding:15px 0}
+.muted{color:#887f96;font-size:13px}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header>
+ <div class="logo">vibra 💜</div>
+ <button class="secondary" onclick="logout()">Sair</button>
+</header>
+
+<main>
+ <section id="auth" class="card">
+  <h2>Entre na Vibra ✨</h2>
+  <input id="name" placeholder="Seu nome (para cadastro)">
+  <input id="email" type="email" placeholder="Seu e-mail">
+  <input id="password" type="password" placeholder="Sua senha">
+  <button onclick="signup()">Criar conta</button>
+  <button class="secondary" onclick="login()">Entrar</button>
+  <p id="authMsg" class="muted"></p>
+ </section>
+
+ <section id="social" class="hidden">
+  <div class="card">
+   <h2>Seu espaço. Sua vibe.</h2>
+   <p class="muted" id="welcome"></p>
+   <textarea id="postText" placeholder="O que você quer compartilhar?"></textarea>
+   <button onclick="publish()">Publicar</button>
+   <p id="postMsg" class="muted"></p>
+  </div>
+  <div class="card">
+   <h2>Feed da comunidade</h2>
+   <div id="feed">Carregando publicações...</div>
+  </div>
+ </section>
+</main>
+
+<script>
+const SUPABASE_URL = "https://pxhfwvbfjppjjslticlx.supabase.co";
+const SUPABASE_KEY = "sb_publishable_tTF_Gx0obR38T0tItvu_Cw_BR8FamHf";
+const db = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+async function signup(){
+ const name=document.getElementById('name').value.trim();
+ const email=document.getElementById('email').value.trim();
+ const password=document.getElementById('password').value;
+ const msg=document.getElementById('authMsg');
+ if(!name||!email||!password){msg.textContent='Preencha todos os campos.';return}
+ const {data,error}=await db.auth.signUp({email,password});
+ if(error){msg.textContent=error.message;return}
+ if(data.user){
+  const {error:profileError}=await db.from('profiles').upsert({
+   id:data.user.id,
+   display_name:name,
+   username:email.split('@')[0]
+  });
+  if(profileError){msg.textContent=profileError.message;return}
+ }
+ msg.textContent='Cadastro iniciado! Confira seu e-mail se a confirmação estiver ativada.';
+ await checkSession();
+}
+
+async function login(){
+ const email=document.getElementById('email').value.trim();
+ const password=document.getElementById('password').value;
+ const msg=document.getElementById('authMsg');
+ const {error}=await db.auth.signInWithPassword({email,password});
+ if(error){msg.textContent=error.message;return}
+ await checkSession();
+}
+
+async function logout(){
+ await db.auth.signOut();
+ document.getElementById('auth').classList.remove('hidden');
+ document.getElementById('social').classList.add('hidden');
+}
+
+async function checkSession(){
+ const {data}=await db.auth.getSession();
+ if(!data.session){
+  document.getElementById('auth').classList.remove('hidden');
+  document.getElementById('social').classList.add('hidden');
+  return;
+ }
+ document.getElementById('auth').classList.add('hidden');
+ document.getElementById('social').classList.remove('hidden');
+ document.getElementById('welcome').textContent='Bem-vindo à Vibra! 💜';
+ loadPosts();
+}
+
+async function publish(){
+ const text=document.getElementById('postText').value.trim();
+ const msg=document.getElementById('postMsg');
+ if(!text){msg.textContent='Escreva algo antes de publicar.';return}
+ const {data:{user}}=await db.auth.getUser();
+ const {error}=await db.from('posts').insert({
+  user_id:user.id,
+  content:text
+ });
+ if(error){msg.textContent=error.message;return}
+ document.getElementById('postText').value='';
+ msg.textContent='Publicação enviada! 💜';
+ loadPosts();
+}
+
+async function loadPosts(){
+ const feed=document.getElementById('feed');
+ const {data,error}=await db.from('posts')
+  .select('id,content,created_at,user_id')
+  .order('created_at',{ascending:false});
+ if(error){feed.textContent='Não foi possível carregar o feed: '+error.message;return}
+ if(!data.length){feed.textContent='Ainda não há publicações. Seja o primeiro!';return}
+ feed.innerHTML='';
+ for(const post of data){
+  const {data:profile}=await db.from('profiles')
+   .select('display_name').eq('id',post.user_id).maybeSingle();
+  const item=document.createElement('div');
+  item.className='post';
+  const author=document.createElement('strong');
+  author.textContent=profile?.display_name||'Pessoa da Vibra';
+  const content=document.createElement('p');
+  content.textContent=post.content;
+  const date=document.createElement('small');
+  date.className='muted';
+  date.textContent=new Date(post.created_at).toLocaleString('pt-BR');
+  item.append(author,content,date);
+  feed.appendChild(item);
+ }
+}
+
+db.auth.onAuthStateChange(()=>checkSession());
+checkSession();
+</script>
+</body>
+</html>
